@@ -78,6 +78,12 @@ export type NumerologyMonth = {
   action: string;
 };
 
+export type NumerologyCycle = {
+  name: string;
+  range: string;
+  theme: string;
+};
+
 export type NumerologyProfile = {
   lifePath: number;
   expression?: number;
@@ -85,6 +91,7 @@ export type NumerologyProfile = {
   personality?: number;
   personalYear: number;
   personalMonths: NumerologyMonth[];
+  pinnacles?: NumerologyCycle[];
   currentNameSummary?: string;
 };
 

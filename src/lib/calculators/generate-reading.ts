@@ -1,20 +1,25 @@
 import type { ReadingRequest } from "@/lib/schemas/reading";
-import type { Goal, ReadingResult } from "@/lib/types/reading";
+import type {
+  BaZiProfile,
+  NumerologyProfile,
+  ReadingResult,
+} from "@/lib/types/reading";
 import { buildTimeline } from "@/lib/calculators/timeline";
 import { generateWesternProfile } from "@/lib/calculators/western";
 import { generateVedicProfile } from "@/lib/calculators/vedic";
 import { generateBaZiProfile } from "@/lib/calculators/bazi";
 import { generateNumerologyProfile } from "@/lib/calculators/numerology";
 import { createSeed, pickFrom } from "@/lib/random";
+import type { TransitModel } from "@/lib/astrology/transits";
 
-const goalLabels: Record<Goal, string> = {
-  career: "career",
-  money: "money",
-  health: "health",
-  relationships: "relationships",
-  move: "moves",
-  study: "learning",
-  creative: "creative work",
+const PLANET_WINDOWS: Record<string, string> = {
+  Sun: "10:00-14:00",
+  Moon: "19:00-21:00",
+  Mercury: "09:00-11:00",
+  Venus: "14:00-18:00",
+  Mars: "07:00-09:00",
+  Jupiter: "13:00-16:00",
+  Saturn: "06:00-08:00",
 };
 
 function computeConfidence(payload: ReadingRequest): "high" | "medium" | "low" {
@@ -26,38 +31,96 @@ function computeConfidence(payload: ReadingRequest): "high" | "medium" | "low" {
   return "low";
 }
 
-function createDatePicks(payload: ReadingRequest) {
-  if (!payload.options?.datePicks) return undefined;
-  const rng = createSeed(`${payload.birth.date}-${payload.birth.city}`);
-  return Array.from({ length: 5 }, (_, index) => {
-    const baseMonth = index + 1;
-    const goal = payload.goals[index % payload.goals.length];
-    const date = `${new Date().getFullYear()}-${String(baseMonth).padStart(2, "0")}-0${(index % 3) + 7}`;
-    return {
-      date,
-      goal,
-      windowLocal: "09:00-11:00",
-      score: Math.round(rng() * 20 + 70),
-      rationale: `Moon supports ${goalLabels[goal] ?? goal}.`,
-    };
-  });
+const MASTER_NUMBERS = new Set([11, 22, 33]);
+
+function reduceDigits(value: number): number {
+  let current = value;
+  while (current > 9 && !MASTER_NUMBERS.has(current)) {
+    current = current
+      .toString()
+      .split("")
+      .reduce((sum, digit) => sum + Number(digit), 0);
+  }
+  return current;
 }
 
-function createRelocationNotes(payload: ReadingRequest) {
+function createDatePicks(
+  payload: ReadingRequest,
+  transits: TransitModel,
+  numerology: NumerologyProfile,
+) {
+  if (!payload.options?.datePicks) return undefined;
+  const candidates = transits.days
+    .filter((day) => day.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 7);
+
+  const picks = candidates.map((day) => {
+    const [, monthString, dayString] = day.date.split("-");
+    const personalDay = reduceDigits(
+      (numerology.personalYear ?? 0) + Number(monthString) + Number(dayString),
+    );
+    const numerologyBoost = personalDay === numerology.personalYear ? 6 : personalDay % 3 === 0 ? 4 : 2;
+    const baseScore = Math.min(99, Math.max(60, Math.round(70 + day.score * 6 + numerologyBoost)));
+    const focusPlanet = day.positives[0]?.planet ?? "Sun";
+    const windowLocal = PLANET_WINDOWS[focusPlanet] ?? "10:00-14:00";
+
+    return {
+      date: day.date,
+      goal: day.dominantGoal,
+      windowLocal,
+      score: baseScore,
+      rationale: `${day.positives[0]?.message ?? "Transit tailwind"} Personal day ${personalDay} aligns with your year ${numerology.personalYear}.`,
+    };
+  });
+
+  return picks.slice(0, 5);
+}
+
+function createRelocationNotes(payload: ReadingRequest, bazi: BaZiProfile) {
   const cities = payload.options?.relocation;
   if (!cities || cities.length === 0) return undefined;
+  const elementFocus = bazi.usefulElements?.[0] ?? "Earth";
+  const elementNotes: Record<string, string> = {
+    Wood: "Choose leafy neighbourhoods or coworking spaces with natural light.",
+    Fire: "Opt for vibrant districts that keep inspiration high.",
+    Earth: "Stabilise in grounded communities with reliable infrastructure.",
+    Metal: "Look for organised hubs with strong systems and mentors.",
+    Water: "Favour waterfront or fluid, collaborative environments.",
+  };
+
   return cities.map((city) => ({
     city,
-    note: "Amplifies visibility. Balance rest and pace.",
+    note: `${elementNotes[elementFocus] ?? "Prioritise balanced qi."} Align the move with ${payload.goals[0]} intentions.`,
   }));
 }
 
-function createHomeSnapshot(payload: ReadingRequest) {
+const ELEMENT_DIRECTIONS: Record<string, string[]> = {
+  Wood: ["east", "southeast"],
+  Fire: ["south", "southwest"],
+  Earth: ["northeast", "southwest"],
+  Metal: ["west", "northwest"],
+  Water: ["north", "northwest"],
+};
+
+function createHomeSnapshot(
+  payload: ReadingRequest,
+  bazi: BaZiProfile,
+  numerology: NumerologyProfile,
+) {
   if (!payload.options?.home) return undefined;
+  const birthYear = Number(payload.birth.date.slice(0, 4));
+  let kua = reduceDigits(birthYear);
+  if (kua === 5) kua = 8;
+
+  const primaryElement = bazi.usefulElements?.[0] ?? "Wood";
+  const directions = ELEMENT_DIRECTIONS[primaryElement] ?? ["east", "southeast"];
+  const cautionElement = bazi.cautionElements?.[0] ?? "Metal";
+
   return {
-    kua: 1,
-    bestDirections: ["east", "southeast", "south", "north"],
-    annualCaution: "Keep the northwest sector calm and clutter free.",
+    kua,
+    bestDirections: directions,
+    annualCaution: `Keep the ${cautionElement.toLowerCase()} sector restful while you navigate Personal Year ${numerology.personalYear}.`,
   };
 }
 
@@ -85,16 +148,21 @@ export function generateReading(payload: ReadingRequest): ReadingResult {
     timezone: payload.timezone,
   };
 
-  const timeline = buildTimeline(context);
-  const western = generateWesternProfile(context);
+  const westernCalculation = generateWesternProfile(context);
   const vedic = generateVedicProfile(context);
-  const bazi = generateBaZiProfile(context);
+  const baziCalculation = generateBaZiProfile(context);
   const numerology = generateNumerologyProfile(context);
+  const timeline = buildTimeline(context, {
+    transits: westernCalculation.transits,
+    vedic,
+    numerology,
+    bazi: baziCalculation.profile,
+  });
 
   const optional = {
-    datePicks: createDatePicks(payload),
-    relocation: createRelocationNotes(payload),
-    home: createHomeSnapshot(payload),
+    datePicks: createDatePicks(payload, westernCalculation.transits, numerology),
+    relocation: createRelocationNotes(payload, baziCalculation.profile),
+    home: createHomeSnapshot(payload, baziCalculation.profile, numerology),
     divination: createDivination(payload),
   };
 
@@ -105,19 +173,11 @@ export function generateReading(payload: ReadingRequest): ReadingResult {
       generatedAt: new Date().toISOString(),
     },
     profiles: {
-      western,
+      western: westernCalculation.profile,
       vedic,
-      bazi,
+      bazi: baziCalculation.profile,
       numerology,
-      zodiac: {
-        animal: "Wood Dragon",
-        ally: "Rat",
-        clash: "Dog",
-        notes: [
-          "Stay grounded during the spring eclipse window.",
-          "Lean on water and metal allies when plans pivot.",
-        ],
-      },
+      zodiac: baziCalculation.zodiac,
     },
     months: timeline,
     optional,

@@ -1,52 +1,98 @@
-﻿import type { ReadingContext, TimelineEntry } from "@/lib/types/reading";
+import type {
+  BaZiProfile,
+  NumerologyProfile,
+  ReadingContext,
+  TimelineEntry,
+  VedicProfile,
+} from "@/lib/types/reading";
+import type { TransitModel } from "@/lib/astrology/transits";
 
-const highlightTemplates = [
-  "Momentum builds around %s",
-  "New allies appear in %s projects",
-  "Health energy rises when you prioritize rest",
-  "Finances benefit from consistent tracking",
-];
-
-const cautionTemplates = [
-  "Guard boundaries around mid-month",
-  "Confirm details before signing",
-  "Watch energy dips after social bursts",
-];
-
-const actionTemplates = [
-  "Schedule a strategy day",
-  "Reach out to a mentor",
-  "Refresh your budget tracker",
-  "Book a wellness check",
-];
-
-function fill(template: string, goal: string) {
-  return template.replace("%s", goal);
+function mergeHighlights(base: string[], additions: string[], limit: number): string[] {
+  const combined = [...base];
+  for (const addition of additions) {
+    if (combined.length >= limit) break;
+    if (!combined.includes(addition)) {
+      combined.push(addition);
+    }
+  }
+  return combined.slice(0, limit);
 }
 
-export function buildTimeline(context: ReadingContext): TimelineEntry[] {
-  const reference = new Date();
-  const goals = context.goals.length > 0 ? context.goals : ["career"];
+function buildVedicNotes(month: string, vedic?: VedicProfile): { highlight?: string; caution?: string } {
+  if (!vedic?.monthlyTags) return {};
+  const tag = vedic.monthlyTags.find((item) => item.month === month);
+  if (!tag) return {};
 
-  return Array.from({ length: context.horizonMonths }, (_, index) => {
-    const monthDate = new Date(reference.getFullYear(), reference.getMonth() + index, 1);
-    const monthKey = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, "0")}`;
-    const dominantGoal = goals[index % goals.length];
+  const pieces: string[] = [];
+  if (tag.focus) pieces.push(`Vedic focus: ${tag.focus}`);
+  if (tag.opportunity) pieces.push(`Opportunity: ${tag.opportunity}`);
+  const highlight = pieces.length > 0 ? pieces.join(" — ") : undefined;
+  const caution = tag.caution ? `Jyotish caution: ${tag.caution}` : undefined;
+  return { highlight, caution };
+}
 
-    const highlights = highlightTemplates.slice(0, 3).map((template) => fill(template, dominantGoal));
-    const cautions = cautionTemplates.slice(0, 2);
-    const bestDays = [7, 14, 21]
-      .slice(0, 2)
-      .map((day) => `${monthKey}-${String(day).padStart(2, "0")}`);
-    const action = actionTemplates[index % actionTemplates.length];
+function buildNumerologyAction(month: string, numerology?: NumerologyProfile): string | undefined {
+  if (!numerology?.personalMonths) return undefined;
+  const tag = numerology.personalMonths.find((item) => item.month === month);
+  if (!tag) return undefined;
+  return `Numerology ${tag.theme}: ${tag.action}`;
+}
 
-    return {
-      month: monthKey,
+function buildBaZiHighlight(month: string, bazi?: BaZiProfile): string | undefined {
+  if (!bazi) return undefined;
+  const element = bazi.usefulElements?.[0];
+  if (!element) return undefined;
+  return `BaZi month cue: weave ${element} qualities into plans.`;
+}
+
+export function buildTimeline(
+  _context: ReadingContext,
+  options: {
+    transits: TransitModel;
+    vedic?: VedicProfile;
+    numerology?: NumerologyProfile;
+    bazi?: BaZiProfile;
+  },
+): TimelineEntry[] {
+  const entries: TimelineEntry[] = [];
+  const { transits, vedic, numerology, bazi } = options;
+
+  for (const month of transits.months) {
+    const vedicNotes = buildVedicNotes(month.month, vedic);
+    const numerologyAction = buildNumerologyAction(month.month, numerology);
+    const baziHighlight = buildBaZiHighlight(month.month, bazi);
+
+    const highlights = mergeHighlights(
+      month.highlights,
+      [vedicNotes.highlight, baziHighlight].filter(Boolean) as string[],
+      3,
+    );
+
+    const cautions = mergeHighlights(
+      month.cautions,
+      [vedicNotes.caution].filter(Boolean) as string[],
+      2,
+    );
+
+    const actionPieces = [month.action];
+    if (numerologyAction) actionPieces.push(numerologyAction);
+    if (vedic?.period) actionPieces.push(`Mahadasha: ${vedic.period}`);
+    const action = actionPieces.join(" • ");
+
+    const sources = new Set(month.sources);
+    if (vedicNotes.highlight || vedicNotes.caution || vedic?.period) sources.add("vedic-dasha");
+    if (numerologyAction) sources.add("numerology-cycles");
+    if (baziHighlight) sources.add("bazi-pillar");
+
+    entries.push({
+      month: month.month,
       highlights,
       cautions,
-      bestDays,
+      bestDays: month.bestDays,
       action,
-      sources: ["western", "vedic", "bazi", "numerology"],
-    } satisfies TimelineEntry;
-  });
+      sources: Array.from(sources),
+    });
+  }
+
+  return entries;
 }

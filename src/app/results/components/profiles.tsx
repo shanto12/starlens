@@ -1,5 +1,6 @@
 import type { ReadingResponse } from "@/lib/schemas/reading";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import React from "react";
 
 function ProfileCard({
   title,
@@ -26,6 +27,7 @@ function ProfileCard({
 }
 
 export function Profiles({ profiles }: { profiles: ReadingResponse["profiles"] }) {
+  const cards: React.ReactNode[] = [];
 
   if (profiles.western) {
     cards.push(
@@ -51,7 +53,8 @@ export function Profiles({ profiles }: { profiles: ReadingResponse["profiles"] }
         details={[
           ...(profiles.vedic.themes ?? []),
           ...(profiles.vedic.monthlyTags?.map(
-            (tag) => `${tag.month}: ${tag.focus}${tag.opportunity ? ` — ${tag.opportunity}` : ""}${tag.caution ? ` (Caution: ${tag.caution})` : ""}`,
+            (tag) =>
+              `${tag.month}: ${tag.focus}${tag.opportunity ? `  ${tag.opportunity}` : ""}${tag.caution ? ` (Caution: ${tag.caution})` : ""}`,
           ) ?? []),
         ]}
       />,
@@ -88,7 +91,10 @@ export function Profiles({ profiles }: { profiles: ReadingResponse["profiles"] }
           profiles.numerology.personality ? `Personality: ${profiles.numerology.personality}` : "",
           `Personal Year: ${profiles.numerology.personalYear}`,
           ...(profiles.numerology.personalMonths?.map((month) =>
-            `${month.month}: ${month.theme} — ${month.action}`,
+            `${month.month}: ${month.theme}  ${month.action}`,
+          ) ?? []),
+          ...(profiles.numerology.pinnacles?.map(
+            (pinnacle) => `${pinnacle.name} (${pinnacle.range}): ${pinnacle.theme}`,
           ) ?? []),
           profiles.numerology.currentNameSummary ?? "",
         ].filter(Boolean)}

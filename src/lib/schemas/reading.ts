@@ -118,6 +118,15 @@ export const numerologyProfileSchema = z.object({
       }),
     )
     .optional(),
+  pinnacles: z
+    .array(
+      z.object({
+        name: z.string(),
+        range: z.string(),
+        theme: z.string(),
+      }),
+    )
+    .optional(),
   currentNameSummary: z.string().optional(),
 });
 
